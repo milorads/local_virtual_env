@@ -1,0 +1,150 @@
+# Media Management Stack Configuration
+# This stack provides a complete media management solution with the following components:
+# - Sonarr: TV show management and automation
+# - Radarr: Movie management and automation
+# - Bazarr: Subtitle management and synchronization
+# - Prowlarr: Indexer management and automation
+
+version: '3.8'
+
+services:
+  # Sonarr - TV Show Management
+  # Web UI available at https://tv.${DOMAIN}
+  # Features:
+  # - TV show tracking and management
+  # - Automated downloads
+  # - Quality profile management
+  # - Episode monitoring
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_DIR}/sonarr:/config
+      - ${SERIES_DIR}:/tv
+      - ${DOWNLOAD_DIR}:/downloads
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarr.rule=Host(`tv.${DOMAIN}`)"
+      - "traefik.http.routers.sonarr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr.tls=true"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Radarr - Movie Management
+  # Web UI available at https://movies.${DOMAIN}
+  # Features:
+  # - Movie tracking and management
+  # - Automated downloads
+  # - Quality profile management
+  # - Release monitoring
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_DIR}/radarr:/config
+      - ${MOVIES_DIR}:/movies
+      - ${DOWNLOAD_DIR}:/downloads
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.radarr.rule=Host(`movies.${DOMAIN}`)"
+      - "traefik.http.routers.radarr.entrypoints=websecure"
+      - "traefik.http.routers.radarr.tls=true"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7878/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Bazarr - Subtitle Management
+  # Web UI available at https://subtitles.${DOMAIN}
+  # Features:
+  # - Subtitle synchronization
+  # - Multiple language support
+  # - Automatic subtitle downloads
+  bazarr:
+    image: linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_DIR}/bazarr:/config
+      - ${MOVIES_DIR}:/movies
+      - ${SERIES_DIR}:/tv
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr.rule=Host(`subtitles.${DOMAIN}`)"
+      - "traefik.http.routers.bazarr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr.tls=true"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6767/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prowlarr - Indexer Management
+  # Web UI available at https://indexers.${DOMAIN}
+  # Features:
+  # - Indexer management
+  # - Torrent and Usenet support
+  # - Integration with Sonarr and Radarr
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_DIR}/prowlarr:/config
+      - ${DOWNLOAD_DIR}:/downloads
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prowlarr.rule=Host(`indexers.${DOMAIN}`)"
+      - "traefik.http.routers.prowlarr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr.tls=true"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=9696"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9696/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  traefik_proxy:
+    external: true

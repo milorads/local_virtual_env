@@ -1,0 +1,59 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - "rules/*.yml"
+
+scrape_configs:
+  # Internal services monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8080']
+    metrics_path: /metrics
+
+  - job_name: 'qbittorrent'
+    static_configs:
+      - targets: ['qbittorrent:8282']
+    metrics_path: /api/v2/transfer/info
+    scheme: http
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # External services monitoring (through blackbox)
+  - job_name: 'blackbox-external'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - https://dashboard.sekulovic.me.eu.org    # Grafana dashboard
+        - https://logs.sekulovic.me.eu.org         # Dozzle logs
+        - https://media.sekulovic.me.eu.org        # Plex media
+        - https://media-stats.sekulovic.me.eu.org  # Tautulli stats
+        - https://requests.sekulovic.me.eu.org     # Overseerr requests
+        - https://traefik.sekulovic.me.eu.org      # Traefik dashboard
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115 

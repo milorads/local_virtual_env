@@ -1,0 +1,104 @@
+version: "3.9"
+
+networks:
+  vpn:
+    external: true
+    name: vpn
+  main:
+    external: true  
+    name: main
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN  # Network admin capability required for VPN
+    devices:
+      - /dev/net/tun:/dev/net/tun  # TUN device for VPN tunnel
+    ports:
+      - 8282:8282  # qBittorrent WebUI
+      - 8888:8888  # VPN HTTP proxy
+      - 9117:9117  # Jackett
+    volumes:
+      - ${DOCKER_DIR}/gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
+      - VPN_TYPE=${VPN_TYPE}
+      - OPENVPN_USER=${VPN_USERNAME}
+      - OPENVPN_PASSWORD=${VPN_PASSWORD}
+      - SERVER_REGIONS=${VPN_REGION}
+      - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_NETWORK}
+      - DOT=off
+      - HEALTH_VPN_DURATION_INITIAL=30s
+    networks:
+      vpn:
+        # Make this the gateway for the VPN network
+        aliases:
+          - vpn-gateway
+      main:
+        # Allow this container to communicate with main network too
+    restart: unless-stopped
+    healthcheck:
+      test: wget -q -O- https://ifconfig.me || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=true
+    
+  # Torrent client - Uses VPN network
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"  # Uses gluetun's network for VPN protection
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8282
+      - UMASK_SET=022
+      # Authentication
+      - WEBUI_USERNAME=${QB_USERNAME}
+      - WEBUI_PASSWORD=${QB_PASSWORD}
+    volumes:
+      - ${DOCKER_DIR}/qbittorrent:/config
+      - ${DOWNLOAD_DIR}:/downloads
+      - ${MEDIA_DIR}:/media:ro  # Read-only access to media
+    restart: unless-stopped
+    depends_on:
+      gluetun:
+        condition: service_healthy  # Only start if VPN is working
+    healthcheck:
+      test: wget -q -O- http://localhost:8282 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  jackett:  # Torrent proxy/indexer
+    image: linuxserver/jackett:latest
+    container_name: jackett
+    network_mode: "service:gluetun"  # Uses gluetun's network for VPN protection
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - AUTO_UPDATE=true
+    volumes:
+      - ${DOCKER_DIR}/jackett:/config
+      - ${DOWNLOAD_DIR}/blackhole:/downloads
+    restart: unless-stopped
+    depends_on:
+      gluetun:
+        condition: service_healthy  # Only start if VPN is working
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9117/UI/Dashboard"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - com.centurylinklabs.watchtower.enable=true

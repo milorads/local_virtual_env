@@ -1,0 +1,28 @@
+# Dynamic DNS Stack Configuration
+# This stack provides automatic DNS record updates for Cloudflare
+# 
+# Components:
+# - Cloudflare DDNS: Automatically updates DNS records when IP changes
+#
+# Features:
+# - Automatic IP detection
+# - Multiple domain support
+# - Cloudflare API integration
+# - Secure container configuration
+
+version: "3.9"
+
+services:
+  # Cloudflare Dynamic DNS Updater
+  cloudflare-ddns:
+    image: favonia/cloudflare-ddns:latest
+    network_mode: host  # Use host network for accurate IP detection
+    restart: always  # Ensure service stays running
+    user: "${PUID}:${PGID}"  # Run as non-root user
+    read_only: true  # Enhance security with read-only filesystem
+    cap_drop: [all]  # Drop all capabilities for security
+    security_opt: [no-new-privileges:true]  # Prevent privilege escalation
+    environment:
+      - CF_API_TOKEN=${CF_DNS_API_TOKEN}  # Cloudflare API token
+      - DOMAINS=${DDNS_DOMAINS}  # Comma-separated list of domains to update
+      - PROXIED=${DDNS_PROXIED}  # Whether to use Cloudflare proxying

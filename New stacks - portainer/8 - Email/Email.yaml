@@ -1,0 +1,87 @@
+# Email Server Stack Configuration
+# This stack provides a complete email solution using docker-mailserver and Roundcube webmail
+# It integrates with Traefik for reverse proxy and SSL termination
+# 
+# Components:
+# - docker-mailserver: Handles all email protocols (SMTP, IMAP, etc.)
+# - Roundcube: Web-based email client
+#
+# Network Configuration:
+# - mail_network: Internal network for email services communication
+# - main: External network for Traefik integration (from core infrastructure)
+
+version: '3'
+
+services:
+  # Main email server handling all email protocols
+  mailserver:
+    image: docker.io/mailserver/docker-mailserver:latest
+    container_name: mailserver
+    hostname: mail.${DOMAIN}
+    domainname: ${DOMAIN}
+    ports:
+      - "25:25"     # SMTP - Standard email submission
+      - "465:465"   # SMTPS - Secure SMTP over SSL
+      - "587:587"   # Submission - SMTP with STARTTLS
+      - "143:143"   # IMAP - Standard email access
+      - "993:993"   # IMAPS - Secure IMAP over SSL
+    volumes:
+      - ${DOCKER_DIR}/mail/data:/var/mail      # Email storage
+      - ${DOCKER_DIR}/mail/state:/var/mail-state  # Mail server state
+      - ${DOCKER_DIR}/mail/logs:/var/log/mail  # Log files
+      - ${DOCKER_DIR}/mail/config:/tmp/docker-mailserver  # Configuration
+      - /etc/localtime:/etc/localtime:ro  # Timezone sync
+    environment:
+      - ENABLE_SPAMASSASSIN=1  # Enable spam filtering
+      - SPAMASSASSIN_SPAM_TO_INBOX=1  # Deliver spam to inbox with marking
+      - ENABLE_CLAMAV=1  # Enable virus scanning
+      - ENABLE_FAIL2BAN=1  # Enable brute force protection
+      - ENABLE_POSTGREY=1  # Enable greylisting
+      - POSTMASTER_ADDRESS=postmaster@${DOMAIN}  # Postmaster email
+      - SSL_TYPE=letsencrypt  # SSL certificate type
+      - ONE_DIR=1  # Store all data in one directory
+      - DMS_DEBUG=0  # Disable debug mode
+      - TZ=${TZ}  # Timezone setting
+    cap_add:
+      - NET_ADMIN  # Required for fail2ban
+      - SYS_PTRACE  # Required for fail2ban
+    restart: always
+    stop_grace_period: 1m  # Grace period for shutdown
+    networks:
+      - mail_network  # Internal mail network
+      - main  # External network for Traefik
+    labels:
+      - "traefik.enable=false"  # Disable Traefik for mail ports
+
+  # Webmail interface using Roundcube
+  webmail:
+    image: roundcube/roundcubemail:latest
+    container_name: roundcube
+    depends_on:
+      - mailserver  # Ensure mailserver starts first
+    volumes:
+      - ${DOCKER_DIR}/mail/roundcube:/var/roundcube/config  # Roundcube configuration
+    environment:
+      - ROUNDCUBEMAIL_DEFAULT_HOST=mailserver  # Default mail server
+      - ROUNDCUBEMAIL_SMTP_SERVER=mailserver  # SMTP server
+      - ROUNDCUBEMAIL_SMTP_PORT=587  # SMTP port
+      - TZ=${TZ}  # Timezone setting
+    restart: always
+    networks:
+      - mail_network  # Internal mail network
+      - main  # External network for Traefik
+    labels:
+      - "traefik.enable=true"  # Enable Traefik
+      - "traefik.http.routers.webmail.rule=Host(`webmail.${DOMAIN}`)"  # Domain rule
+      - "traefik.http.routers.webmail.entrypoints=websecure"  # HTTPS entrypoint
+      - "traefik.http.routers.webmail.tls=true"  # Enable TLS
+      - "traefik.http.routers.webmail.tls.certresolver=default"  # SSL certificate resolver
+      - "traefik.http.services.webmail.loadbalancer.server.port=80"  # Container port
+
+# Network Definitions
+networks:
+  mail_network:
+    name: mail_network  # Internal network for mail services
+  main:
+    external: true  # External network from core infrastructure
+    name: main 

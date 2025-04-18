@@ -1,0 +1,21 @@
+talosctl gen config pm-cluster https://172.16.1.204:6443 --output-dir talos_config
+
+talosctl apply-config --insecure --nodes 172.16.1.204 --file talos_config/controlplane.yaml
+
+export TALOSCONFIG="talos_config/talosconfig"
+talosctl config endpoint 172.16.1.204
+talosctl config node 172.16.1.204
+
+talosctl bootstrap
+
+talosctl kubeconfig .
+
+export KUBECONFIG="talos_config/kubeconfig"
+
+kubectl get nodes
+
+export WORKER_IP=172.16.1.203
+
+talosctl apply-config --insecure --nodes 172.16.1.203 --file talos_config/worker.yaml
+
+https://www.virtualizationhowto.com/2024/01/proxmox-kubernetes-install-with-talos-linux/

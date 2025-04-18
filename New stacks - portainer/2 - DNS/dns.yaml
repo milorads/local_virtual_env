@@ -1,0 +1,58 @@
+# DNS Server Stack Configuration
+# This stack provides a local DNS server using Pi-hole with Unbound
+# 
+# Components:
+# - Pi-hole: Network-wide ad blocking and DNS server
+# - Unbound: Recursive DNS resolver for improved privacy and performance
+#
+# Features:
+# - Ad blocking
+# - DNS caching
+# - Custom DNS records
+# - DNSSEC support
+# - Reverse DNS for local network
+
+version: "3.9"
+
+networks:
+  # Connect to the main network from core infrastructure
+  main:
+    external: true
+    name: main
+
+volumes:
+  # Persistent storage for Pi-hole configuration
+  etc_pihole-unbound:
+  # Persistent storage for DNSmasq configuration
+  etc_pihole_dnsmasq-unbound:
+
+services:
+  # Pi-hole with Unbound DNS Server
+  pihole:
+    container_name: pihole
+    image: cbcrowe/pihole-unbound:latest
+    hostname: pihole
+    domainname: pihole.local
+    ports:
+      - 443:443/tcp  # HTTPS for web interface
+      - 53:53/tcp  # DNS over TCP
+      - 53:53/udp  # DNS over UDP
+      - 80:80/tcp  # HTTP for web interface (alternative port)
+      # - 5335:5335/tcp  # Unbound DNS port (uncomment to enable direct access)
+      # - 22/tcp  # SSH access (uncomment to enable)
+    environment:
+      - FTLCONF_LOCAL_IPV4=172.16.1.200  # Local IP address for Pi-hole
+      - TZ=${TZ}  # Timezone setting
+      - WEBPASSWORD=${WEBPASSWORD}  # Admin password for web interface
+      - WEBTHEME=default-dark  # Web interface theme
+      - REV_SERVER=true  # Enable reverse DNS server
+      - REV_SERVER_TARGET=${REV_SERVER_TARGET}  # Target DNS server for reverse lookups
+      - REV_SERVER_DOMAIN=${REV_SERVER_DOMAIN}  # Local domain for reverse lookups
+      - REV_SERVER_CIDR=${REV_SERVER_CIDR}  # Local network CIDR
+      - PIHOLE_DNS_=${PIHOLE_DNS_}  # Upstream DNS server (Unbound)
+      - DNSSEC="true"  # Enable DNSSEC validation
+      - DNSMASQ_LISTENING=single  # Listen on all interfaces
+    volumes:
+      - etc_pihole-unbound:/etc/pihole:rw  # Pi-hole configuration
+      - etc_pihole_dnsmasq-unbound:/etc/dnsmasq.d:rw  # DNSmasq configuration
+    restart: unless-stopped

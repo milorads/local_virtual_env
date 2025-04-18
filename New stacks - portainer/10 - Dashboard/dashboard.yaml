@@ -1,0 +1,39 @@
+version: "3.9"
+networks:
+  main:
+    external: true
+services:
+  homarr:
+    image: ghcr.io/homarr-labs/homarr:latest
+    container_name: homarr
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_DIR}/homarr/:/appdata
+    ports:
+      - "7575:7575"
+    environment:
+      - BASE_URL=/
+      - DISABLE_ANALYTICS=true
+      - TZ=${TZ}
+      - AUTH_ENABLED=true 
+      - AUTH_USERNAME=${HOMARR_USERNAME}
+      - AUTH_PASSWORD=${HOMARR_PASSWORD}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY}
+    networks:
+      - main
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7575"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.homarr.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.homarr.entrypoints=websecure
+      - traefik.http.routers.homarr.tls=true
+      - traefik.http.routers.homarr.tls.certresolver=letsencrypt
+      - traefik.http.services.homarr.loadbalancer.server.port=7575
+      - traefik.http.routers.homarr.middlewares=security-headers
+      - com.centurylinklabs.watchtower.enable=true

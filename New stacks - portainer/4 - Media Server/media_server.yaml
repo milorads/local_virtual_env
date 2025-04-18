@@ -1,0 +1,132 @@
+# Media Server Stack Configuration
+# This stack provides a complete media streaming solution
+# 
+# Components:
+# - Plex: Media server for streaming content
+# - Overseerr: Request management system for Plex
+# - Tautulli: Plex monitoring and statistics tool
+#
+# Features:
+# - Hardware transcoding support
+# - Remote access via HTTPS
+# - Media request system
+# - Usage statistics and monitoring
+
+version: "3.9"
+
+networks:
+  # Connect to the main network from core infrastructure
+  main:
+    external: true
+    name: main
+
+services:
+  # Plex - Media Server
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    environment:
+      - PUID=${PUID}  # User ID for file permissions
+      - PGID=${PGID}  # Group ID for file permissions
+      - VERSION=docker  # Use Docker version
+      - PLEX_CLAIM=${PLEX_CLAIM}  # Claim token for server registration
+      - ADVERTISE_IP=https://media.${DOMAIN}  # Advertise HTTPS URL
+      - ALLOWED_NETWORKS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,172.17.0.0/16  # Local networks
+      - HOSTNAME=media.${DOMAIN}  # Server hostname
+    devices:
+      - /dev/dri:/dev/dri  # Hardware acceleration support
+    ports:  # Plex required ports
+      - '32400:32400'  # Main web UI port
+      - '3005:3005'  # Control port
+      - '8324:8324'  # Control port
+      - '32410:32410/udp'  # Discovery port
+      - '32412:32412/udp'  # Discovery port
+      - '32413:32413/udp'  # Discovery port
+      - '32414:32414/udp'  # Discovery port
+      - '32469:32469'  # DLNA port
+    volumes:
+      - ${DOCKER_DIR}/plex/config:/config  # Plex configuration
+      - ${DOCKER_DIR}/plex/share:/shared  # Shared data
+      - ${MEDIA_DIR}:/media  # Media library
+    networks:
+      - main  # Connect to main network
+    restart: always  # Always restart on failure
+    healthcheck:
+      test: curl --fail http://localhost:32400/web || exit 1  # Check web interface
+      interval: 30s  # Check every 30 seconds
+      timeout: 10s  # Timeout after 10 seconds
+      retries: 3  # Retry 3 times
+    labels:
+      - traefik.enable=true  # Enable Traefik
+      - traefik.http.routers.plex.rule=Host(`media.${DOMAIN}`)  # Domain rule
+      - traefik.http.routers.plex.entrypoints=websecure  # HTTPS entrypoint
+      - traefik.http.routers.plex.tls=true  # Enable TLS
+      - traefik.http.routers.plex.tls.certresolver=letsencrypt  # Use Let's Encrypt
+      - traefik.http.services.plex.loadbalancer.server.port=32400  # Container port
+      - traefik.http.routers.plex.middlewares=security-headers,rate-limit  # Apply security
+      # Special websocket support for Plex
+      - "traefik.http.middlewares.plex-websocket.replacepathregex.regex=^/(\\?[^/]*)?$$"  # Regex pattern
+      - "traefik.http.middlewares.plex-websocket.replacepathregex.replacement=/web$$1"  # Replacement
+      - com.centurylinklabs.watchtower.enable=true  # Allow container updates
+    
+  # Overseerr - Request Management System
+  overseerr:
+    container_name: overseerr
+    image: linuxserver/overseerr:latest
+    restart: always  # Always restart on failure
+    ports:
+      - '5055:5055'  # Web UI port
+    environment:
+      - PUID=${PUID}  # User ID for file permissions
+      - PGID=${PGID}  # Group ID for file permissions
+      - TZ=${TZ}  # Timezone setting
+      - LOG_LEVEL=debug  # Verbose logging
+    healthcheck:
+      test: "curl --fail http://localhost:5055 || exit 1"  # Check web interface
+      interval: 30s  # Check every 30 seconds
+      timeout: 10s  # Timeout after 10 seconds
+      retries: 3  # Retry 3 times
+    volumes:
+      - ${DOCKER_DIR}/overseerr:/config  # Configuration storage
+    networks:
+      - main  # Connect to main network
+    labels:
+      - traefik.enable=true  # Enable Traefik
+      - traefik.http.routers.overseerr.rule=Host(`requests.${DOMAIN}`)  # Domain rule
+      - traefik.http.routers.overseerr.entrypoints=websecure  # HTTPS entrypoint
+      - traefik.http.routers.overseerr.tls=true  # Enable TLS
+      - traefik.http.routers.overseerr.tls.certresolver=letsencrypt  # Use Let's Encrypt
+      - traefik.http.services.overseerr.loadbalancer.server.port=5055  # Container port
+      - traefik.http.routers.overseerr.middlewares=security-headers,rate-limit  # Apply security
+      - com.centurylinklabs.watchtower.enable=true  # Allow container updates
+    
+  # Tautulli - Plex Monitoring Tool
+  tautulli:
+    container_name: tautulli
+    image: linuxserver/tautulli:latest
+    restart: always  # Always restart on failure
+    ports:
+      - '8181:8181'  # Web UI port
+    environment:
+      - PUID=${PUID}  # User ID for file permissions
+      - PGID=${PGID}  # Group ID for file permissions
+      - UMASK=002  # File permission mask
+      - TZ=${TZ}  # Timezone setting
+    healthcheck:
+      test: "curl --fail http://localhost:8181 || exit 1"  # Check web interface
+      interval: 30s  # Check every 30 seconds
+      timeout: 10s  # Timeout after 10 seconds
+      retries: 3  # Retry 3 times
+    volumes:
+      - ${DOCKER_DIR}/tautulli:/config  # Configuration storage
+    networks:
+      - main  # Connect to main network
+    labels:
+      - traefik.enable=true  # Enable Traefik
+      - traefik.http.routers.tautulli.rule=Host(`media-stats.${DOMAIN}`)  # Domain rule
+      - traefik.http.routers.tautulli.entrypoints=websecure  # HTTPS entrypoint
+      - traefik.http.routers.tautulli.tls=true  # Enable TLS
+      - traefik.http.routers.tautulli.tls.certresolver=letsencrypt  # Use Let's Encrypt
+      - traefik.http.services.tautulli.loadbalancer.server.port=8181  # Container port
+      - traefik.http.routers.tautulli.middlewares=security-headers,rate-limit  # Apply security
+      - com.centurylinklabs.watchtower.enable=true  # Allow container updates

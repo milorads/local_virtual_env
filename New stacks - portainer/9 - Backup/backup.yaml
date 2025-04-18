@@ -1,0 +1,34 @@
+version: "3.9"
+
+networks:
+  main:
+    external: true
+
+services:
+  # Kopia - Modern backup solution with web UI
+  kopia:
+    image: kopia/kopia:latest
+    container_name: kopia
+    ports:
+      - 51515:51515 # Web interface
+    volumes:
+      - ${DOCKER_DIR}/kopia:/app/config # Configuration files
+      - ${DOCKER_DIR}:/source:rw # Source directory to backup
+      - ${BACKUP_DIR}:/repository # Backup repository location
+    restart: unless-stopped
+    command: >
+      server start
+      --insecure
+      --address 0.0.0.0:51515
+      --server-username=${KOPIA_USERNAME}
+      --server-password=${KOPIA_PASSWORD}
+      --tls-generate-cert
+      --server-control-username=${KOPIA_ADMIN_USERNAME}
+      --server-control-password=${KOPIA_ADMIN_PASSWORD}
+    networks:
+      - main
+    environment:
+      - TZ=${TZ}
+      - KOPIA_PASSWORD=${KOPIA_REPO_PASSWORD}
+    labels:
+      - com.centurylinklabs.watchtower.enable=true # Enable automatic updates

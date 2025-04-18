@@ -1,0 +1,13 @@
+-enable arr cleanup
+-finish moving backup
+
+#setup alert manager after emails
+#add telegram or signal notifications
+#add tdarr
+#add email to dns too
+#add sso -authelia or keycloak
+#cv
+#file hosting
+
+#local ai
+#kubernetes

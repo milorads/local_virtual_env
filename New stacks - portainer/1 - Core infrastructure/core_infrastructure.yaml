@@ -1,0 +1,132 @@
+# Core Infrastructure Stack Configuration
+# This stack provides the foundational services for the entire Docker environment
+# 
+# Components:
+# - Traefik: Reverse proxy and SSL termination
+# - Watchtower: Automatic container updates
+# - Network Creator: Ensures required networks exist
+#
+# Network Configuration:
+# - main: Primary network for service communication
+# - vpn: Isolated network for privacy-focused services
+
+version: "3.9"
+
+networks:
+  # Primary network for inter-service communication
+  main:
+    driver: bridge
+    name: main
+  # Isolated network for privacy-focused services
+  vpn:
+    driver: bridge
+    name: vpn
+    internal: false  # Allows internet access through VPN container
+
+services:
+  # Traefik - Reverse Proxy and SSL Manager
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP - Redirects to HTTPS
+      - "443:443"     # HTTPS - Main entry point
+      - "9001:9001"   # Dashboard - Management interface
+    command:
+      # API and Dashboard Configuration
+      - "--api=true"  # Enable API
+      - "--api.dashboard=true"  # Enable dashboard
+      - "--api.insecure=true"  # Allow insecure dashboard access (protected by auth)
+      
+      # Docker Provider Configuration
+      - "--providers.docker=true"  # Enable Docker provider
+      - "--providers.docker.exposedbydefault=false"  # Services must opt-in to Traefik
+      
+      # Entry Points Configuration
+      - "--entrypoints.web.address=:80"  # HTTP entry point
+      - "--entrypoints.websecure.address=:443"  # HTTPS entry point
+      
+      # SSL Certificate Configuration
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"  # Contact email
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"  # Certificate storage
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"  # Use DNS challenge
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"  # Cloudflare DNS provider
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"  # DNS resolvers
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=30"  # DNS propagation delay
+      
+      # HTTP to HTTPS Redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"  # Redirect to HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"  # Use HTTPS scheme
+      
+      # Logging Configuration
+      - "--log.level=DEBUG"  # Detailed logging for troubleshooting
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket access
+      - ${DOCKER_DIR}/traefik/letsencrypt:/letsencrypt  # SSL certificates
+    environment:
+      - CF_API_EMAIL=${CF_API_EMAIL}  # Cloudflare API email
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}  # Cloudflare DNS API token
+      - CF_ZONE_API_TOKEN=${CF_DNS_API_TOKEN}  # Cloudflare Zone API token
+    networks:
+      - main  # Connect to main network
+    labels:
+      - traefik.enable=true  # Enable Traefik for this container
+      
+      # Security Headers Configuration
+      - "traefik.http.middlewares.security-headers.headers.customResponseHeaders.Strict-Transport-Security=max-age=63072000; includeSubDomains; preload"  # HSTS
+      - "traefik.http.middlewares.security-headers.headers.frameDeny=true"  # Prevent framing
+      - "traefik.http.middlewares.security-headers.headers.browserXssFilter=true"  # XSS protection
+      - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"  # Prevent MIME sniffing
+      
+      # Dashboard Authentication
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"  # Basic auth credentials
+      
+      # Dashboard Router Configuration
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)"  # Dashboard domain
+      - "traefik.http.routers.dashboard.service=api@internal"  # Internal API service
+      - "traefik.http.routers.dashboard.entrypoints=websecure"  # HTTPS only
+      - "traefik.http.routers.dashboard.tls=true"  # Enable TLS
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"  # Use Let's Encrypt
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth,security-headers"  # Apply security
+
+      # Local Dashboard Access
+      - "traefik.http.routers.dashboard-local.rule=Host(`localhost`) || HostRegexp(`{ip:[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+}`)"  # Local access
+      - "traefik.http.routers.dashboard-local.service=api@internal"  # Internal API service
+      - "traefik.http.routers.dashboard-local.entrypoints=traefik"  # Local entrypoint
+      - "traefik.http.routers.dashboard-local.middlewares=dashboard-auth"  # Authentication required
+      
+      # Rate Limiting Configuration
+      - "traefik.http.middlewares.rate-limit.ratelimit.average=100"  # Average requests per second
+      - "traefik.http.middlewares.rate-limit.ratelimit.burst=50"  # Burst allowance
+      
+      # Watchtower Configuration
+      - com.centurylinklabs.watchtower.enable=true  # Allow container updates
+      
+  # Watchtower - Automatic Container Updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    environment:
+      - WATCHTOWER_CLEANUP=true  # Remove old images
+      - WATCHTOWER_SCHEDULE=${WATCHTOWER_SCHEDULE}  # Update schedule
+      - WATCHTOWER_TIMEOUT=30s  # Update timeout
+      - TZ=${TZ}  # Timezone setting
+      - WATCHTOWER_NOTIFICATIONS=shoutrrr  # Enable notifications
+      #- WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}  # Notification endpoint
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket access
+    networks:
+      - main  # Connect to main network
+    restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=false  # Don't update itself
+
+  # Network Creator - Ensures Required Networks Exist
+  network-creator:
+    image: alpine:latest
+    command: sh -c "echo 'Networks created' && tail -f /dev/null"  # Keep container running
+    networks:
+      - main  # Connect to main network
+      - vpn  # Connect to VPN network
+    restart: "no"  # Don't restart if stopped

@@ -1,0 +1,173 @@
+version: "3.9"
+
+networks:
+  main:
+    external: true
+
+services:
+  # Monitoring: Prometheus (metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    user: "${PUID}:${PGID}"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ${DOCKER_DIR}/prometheus/config:/etc/prometheus # Configuration files
+      - ${DOCKER_DIR}/prometheus/data:/prometheus # Metrics data storage
+    ports:
+      - 9090:9090 # Web interface
+    networks:
+      - main
+    restart: unless-stopped
+    healthcheck:
+      test: wget -q -O- http://localhost:9090/-/healthy || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - com.centurylinklabs.watchtower.enable=true # Enable automatic updates
+
+# Monitoring: Alertmanager (alerting and routing)
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093" # Web interface
+    volumes:
+      - ${DOCKER_DIR}/alertmanager:/etc/alertmanager # Configuration files
+    networks:
+      - main
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+# Monitoring: Blackbox Exporter (HTTP/HTTPS/TCP/DNS/ICMP monitoring)
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    restart: unless-stopped
+    ports:
+      - 9115:9115 # Local access only
+    volumes:
+      - ${DOCKER_DIR}/blackbox-exporter:/config
+    command:
+      - '--config.file=/config/blackbox.yml'
+    networks:
+      - main
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - 9100:9100
+    networks:
+      - main
+    restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+      
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - 8085:8080
+    networks:
+      - main
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: "${PUID}:${PGID}"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel,grafana-worldmap-panel
+      - GF_SERVER_ROOT_URL=https://dashboard.${DOMAIN}/      
+      - GF_SERVER_DOMAIN=dashboard.${DOMAIN}
+      - GF_SERVER_ENFORCE_DOMAIN=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SECURE=false
+      # Settings for Cloudflare proxying
+      - GF_SERVER_PROTOCOL=http
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_SERVER_ENABLE_GZIP=true
+    volumes:
+      - ${DOCKER_DIR}/grafana:/var/lib/grafana
+    ports:
+      - 3000:3000
+    networks:
+      - main
+    restart: unless-stopped
+    healthcheck:
+      test: wget -q -O- http://localhost:3000/api/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`dashboard.${DOMAIN}`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls=true
+      - traefik.http.routers.grafana.tls.certresolver=letsencrypt
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+      # Use simpler middleware reference for now
+      - traefik.http.routers.grafana.middlewares=security-headers
+      - com.centurylinklabs.watchtower.enable=true
+
+
+# Dozzle - Real-time log viewer for Docker containers
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - '8765:8080'  # Changed to avoid conflict with other services
+    environment:
+      DOZZLE_LEVEL: info
+      DOZZLE_FILTER: "status=running"
+      DOZZLE_AUTH_PROVIDER: simple
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /media/ext1/docker/dozzle:/data
+    networks:
+      - main
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dozzle.rule=Host(`logs.${DOMAIN}`)
+      - traefik.http.routers.dozzle.entrypoints=websecure
+      - traefik.http.routers.dozzle.tls=true
+      - traefik.http.routers.dozzle.tls.certresolver=letsencrypt
+      - traefik.http.services.dozzle.loadbalancer.server.port=8080
+      # Properly reference middlewares defined on the traefik container
+      - traefik.http.routers.dozzle.middlewares=security-headers@docker
+      - com.centurylinklabs.watchtower.enable=true
